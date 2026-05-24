@@ -3,14 +3,16 @@
 import { useEffect, useRef } from "react";
 import * as Phaser from "phaser";
 
-const SPEED = 80; // pixels per second
+const SPEED = 80;
+const WORLD_W = 320;
+const WORLD_H = 180;
 
 export default function Game() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     class GameScene extends Phaser.Scene {
-      private cat!: Phaser.GameObjects.Sprite;
+      private croppie!: Phaser.GameObjects.Sprite;
       private keys!: Record<string, Phaser.Input.Keyboard.Key>;
       private keyOrder: string[] = [];
       private currentDir = "walk-left";
@@ -18,29 +20,56 @@ export default function Game() {
 
       preload() {
         this.load.image("background", "/sprites/background.png");
-        this.load.aseprite("cewpie", "/sprites/cewpie.png", "/sprites/cewpie.json");
+        this.load.aseprite("croppie", "/sprites/croppie.png", "/sprites/croppie.json");
       }
 
-      private visibleBottom(): number {
-        const { width: gW, height: gH } = this.scale.gameSize;
-        const { width: pW, height: pH } = this.scale.parentSize;
-        const scale = Math.max(pW / gW, pH / gH);
-        const visH = pH / scale;
-        return gH / 2 + visH / 2;
+      private applyZoom() {
+        const zoom = Math.max(this.scale.width / WORLD_W, this.scale.height / WORLD_H);
+        this.cameras.main.setZoom(zoom);
       }
 
       create() {
         this.add.image(0, 0, "background").setOrigin(0, 0);
 
-        this.anims.createFromAseprite("cewpie");
+        this.anims.createFromAseprite("croppie");
 
-        this.cat = this.add.sprite(
-          this.scale.width / 2,
-          this.visibleBottom() * 0.75,
-          "cewpie"
+        this.applyZoom();
+        this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+
+        this.croppie = this.add.sprite(
+          WORLD_W / 2 + 40,
+          WORLD_H / 2 + 10,
+          "croppie"
         );
 
-        this.showStanding("walk-left");
+        this.cameras.main.startFollow(this.croppie);
+
+        const saved = localStorage.getItem("pos");
+        let startDir = "walk-left";
+        if (saved) {
+          const { x, y, dir, flipX } = JSON.parse(saved);
+          this.croppie.setPosition(x, y);
+          this.croppie.setFlipX(flipX ?? false);
+          startDir = dir ?? "walk-left";
+        }
+
+        this.showStanding(startDir);
+        
+
+        this.scale.on("resize", this.applyZoom, this);
+
+        const interactZone = new Phaser.Geom.Rectangle(
+          WORLD_W / 2 - 25,
+          WORLD_H / 2 - 25,
+          50,
+          40
+        );
+
+        this.input.keyboard!.on("keydown-SPACE", () => {
+          if (Phaser.Geom.Rectangle.Contains(interactZone, this.croppie.x, this.croppie.y)) {
+            window.open("/meow", "_self");
+          }
+        });
 
         this.keys = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
 
@@ -56,10 +85,10 @@ export default function Game() {
       }
 
       private showStanding(animKey: string) {
-        const anim = this.anims.get(animKey);
-        if (anim?.frames.length) {
-          this.cat.anims.stop();
-          this.cat.setFrame(anim.frames[0].frame.name);
+        const standKey = animKey.replace("walk-", "stand-");
+        if (this.croppie.anims.currentAnim?.key !== standKey || !this.croppie.anims.isPlaying) {
+          const startFrame = (this.croppie.anims.currentFrame?.index ?? 1) - 1;
+          this.croppie.play({ key: standKey, repeat: -1, startFrame });
         }
         this.currentDir = animKey;
       }
@@ -101,32 +130,28 @@ export default function Game() {
             break;
         }
 
-        this.cat.setFlipX(flipX);
+        this.croppie.setFlipX(flipX);
 
-        if (this.cat.anims.currentAnim?.key !== animKey || !this.cat.anims.isPlaying) {
-          this.cat.play(animKey);
+        if (this.croppie.anims.currentAnim?.key !== animKey || !this.croppie.anims.isPlaying) {
+          this.croppie.play(animKey);
         }
 
         this.currentDir = animKey;
         this.isMoving = true;
-        this.cat.x += dx * dt;
-        this.cat.y += dy * dt;
+        this.croppie.x = Phaser.Math.Clamp(this.croppie.x + dx * dt, 14, WORLD_W - 14);
+        this.croppie.y = Phaser.Math.Clamp(this.croppie.y + dy * dt, 11, WORLD_H - 11);
+        localStorage.setItem("pos", JSON.stringify({ x: this.croppie.x, y: this.croppie.y, dir: this.currentDir, flipX: this.croppie.flipX }));
       }
     }
 
     const game = new Phaser.Game({
       type: Phaser.AUTO,
-      width: 320,
-      height: 180,
       scene: GameScene,
       parent: containerRef.current ?? undefined,
       backgroundColor: "#000000",
       pixelArt: true,
       scale: {
-        mode: Phaser.Scale.ENVELOP,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-        width: 320,
-        height: 180,
+        mode: Phaser.Scale.RESIZE,
       },
     });
 
